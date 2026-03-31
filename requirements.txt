@@ -4,3 +4,4 @@ plotly
 transformers
 torch
 tensorflow
+flask
