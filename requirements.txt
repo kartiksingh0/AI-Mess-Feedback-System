@@ -3,6 +3,6 @@ pandas
 plotly
 transformers
 torch
-tensorflow
+
 flask
 python-3.10
