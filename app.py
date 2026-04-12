@@ -1,158 +1,114 @@
+# app.py
 import streamlit as st
 import pandas as pd
-import datetime
-import os
+import datetime, os
 import plotly.express as px
-from processor import (
-    categorize_feedback, 
-    analyze_sentiment, 
-    get_macros, 
-    estimate_waste, 
-    get_ai_suggestion,
-    NUTRITION_DATA, 
-    TRANSLATIONS
-)
+from processor import *
 
-# --- 1. PAGE CONFIG & GLOBAL STYLING ---
 st.set_page_config(page_title="Omni-Mess AI", layout="wide", page_icon="🍽️")
 
-def apply_advanced_ui(item_bg):
-    bg_images = {
-        "Breakfast: Poha": "https://images.unsplash.com/photo-1626132647523-66f5bf380027?q=80&w=1600",
-        "Lunch: Thali": "https://images.unsplash.com/photo-1546833999-b9f581a1996d?q=80&w=1600",
-        "Dinner: Paneer": "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?q=80&w=1600",
-        "South Indian: Dosa": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?q=80&w=1600",
-        "Special: Biryani": "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?q=80&w=1600",
-        "Other/General": "https://images.unsplash.com/photo-1490812945881-3353c1ac1f73?q=80&w=1600"
-    }
-    selected_bg = bg_images.get(item_bg, bg_images["Other/General"])
+def apply_ui(meal_type):
+    bgs = {"Breakfast": "https://images.unsplash.com/photo-1493770348161-369560ae357d?q=80&w=1600",
+           "Lunch": "https://images.unsplash.com/photo-1546833999-b9f581a1996d?q=80&w=1600",
+           "Dinner": "https://images.unsplash.com/photo-1515516969-d4008cc6241a?q=80&w=1600"}
+    st.markdown(f"""<style>.stApp {{ background: linear-gradient(rgba(15,23,42,0.9),rgba(15,23,42,0.9)), url("{bgs.get(meal_type)}"); background-size: cover; color: #f8fafc; }}
+    div[data-testid="stForm"] {{ background: rgba(255,255,255,0.05)!important; backdrop-filter: blur(15px); border-radius: 20px; padding: 25px; border: 1px solid rgba(255,255,255,0.1); }}
+    h1, h2, h3 {{ color: #60a5fa!important; }}
+    .stButton>button {{ background: linear-gradient(90deg, #3b82f6, #2563eb); color: white; border-radius: 10px; font-weight: bold; width: 100%; }}
+    </style>""", unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <style>
-    .stApp {{
-        background: linear-gradient(rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.88)), url("{selected_bg}");
-        background-size: cover; background-position: center; background-attachment: fixed;
-        color: #f8fafc;
-    }}
-    div[data-testid="stForm"], div.stExpander {{
-        background: rgba(255, 255, 255, 0.05) !important;
-        backdrop-filter: blur(15px); border-radius: 20px; 
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        padding: 25px;
-    }}
-    h1, h2, h3 {{ color: #60a5fa !important; font-weight: 700 !important; }}
-    .stButton>button {{
-        width: 100%; background: linear-gradient(90deg, #3b82f6, #2563eb);
-        color: white; border-radius: 12px; border: none; font-weight: bold; height: 3em;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
+# Database Setup
+DB = "mess_data.csv"
+COLUMNS = ["ID","Date","Name","Roll_No","Course","Meal_Type","Item","Quantity","Protein","Calories","Waste_Est","Taste_Rating","Hygiene_Rating","Comment","Sentiment","AI_Suggestion"]
 
-# --- 2. PERSISTENT DATA ENGINE ---
-DB_FILE = "mess_data.csv"
+if 'db' not in st.session_state:
+    st.session_state.db = pd.read_csv(DB) if os.path.exists(DB) else pd.DataFrame(columns=COLUMNS)
 
-def load_data():
-    if os.path.exists(DB_FILE):
-        return pd.read_csv(DB_FILE)
-    return pd.DataFrame(columns=[
-        "ID", "Date", "Category", "Item", "Quantity", "Protein", "Fats", "Carbs", "Calories", 
-        "Waste_Est", "Taste_Rating", "Hygiene_Rating", "Comment", "Sentiment", "Status", "AI_Suggestion"
-    ])
+# Time Logic
+hr = datetime.datetime.now().hour
+m_now, col = ("Breakfast", "#fbbf24") if 5<=hr<11 else ("Lunch", "#10b981") if 11<=hr<16 else ("Dinner", "#3b82f6")
+apply_ui(m_now)
 
-def save_data(df):
-    df.to_csv(DB_FILE, index=False)
+# Sidebar
+pw = st.sidebar.text_input("🔑 Admin Password", type="password")
+page = st.sidebar.selectbox("Navigate", ["Student Portal", "Management Analytics"]) if pw == "kartik123" else "Student Portal"
+lang = st.sidebar.selectbox("🌐 Language", list(TRANSLATIONS.keys()))
+t = TRANSLATIONS[lang]
 
-if 'feedback_db' not in st.session_state:
-    st.session_state.feedback_db = load_data()
-
-# --- 3. SIDEBAR & ADMIN LOGIN ---
-st.sidebar.markdown("# 🛡️ Control Center")
-selected_lang = st.sidebar.selectbox("🌐 Select Language", list(TRANSLATIONS.keys()))
-t = TRANSLATIONS[selected_lang]
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔒 Admin Access")
-password = st.sidebar.text_input("Password", type="password")
-
-if password == "kartik123":
-    st.sidebar.success("✅ Admin Verified")
-    page = st.sidebar.selectbox("Navigate to:", ["Student Feedback Portal", "Management Analytics", "⚙️ Menu Settings"])
-else:
-    page = "Student Feedback Portal"
-
-temp_item = "Other/General"
-if page == "Student Feedback Portal":
-    temp_item = st.sidebar.selectbox("Preview Background", list(NUTRITION_DATA.keys()))
-
-apply_advanced_ui(temp_item)
-
-# --- 4. STUDENT FEEDBACK PORTAL ---
-if page == "Student Feedback Portal":
-    st.markdown(f"<h1 style='text-align: center;'>{t['title']}</h1>", unsafe_allow_html=True)
+# --- STUDENT PORTAL ---
+if page == "Student Portal":
+    st.markdown(f'<div style="border-left: 5px solid {col}; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; margin-bottom: 20px;">'
+                f'<h4 style="margin:0; color:{col};">● LIVE SESSION</h4>'
+                f'<h2 style="margin:0;">{m_now} | {datetime.datetime.now().strftime("%I:%M %p")}</h2></div>', unsafe_allow_html=True)
 
     with st.form("feedback_form", clear_on_submit=True):
-        grams = st.slider(t['quantity'], 100, 600, 250, step=50)
+        st.subheader(t['student_info'])
+        c_i1, c_i2, c_i3 = st.columns(3)
+        with c_i1: s_name = st.text_input(t['name'])
+        with c_i2: s_roll = st.text_input(t['roll'])
+        with c_i3: s_course = st.text_input(t['course'])
+        
+        st.markdown("---")
         c1, c2 = st.columns(2)
-        with c1: taste = st.select_slider(t['taste'], options=[1, 2, 3, 4, 5], value=3)
-        with c2: hygiene = st.select_slider(t['hygiene'], options=[1, 2, 3, 4, 5], value=3)
+        with c1: m_type = st.selectbox("Category", ["Breakfast", "Lunch", "Dinner"], index=["Breakfast", "Lunch", "Dinner"].index(m_now), disabled=True)
+        with c2: food_item = st.selectbox("Dish Selection", list(MENU[m_type].keys()))
+        
+        grams = st.slider(t['quantity'], 100, 600, 250, step=50)
+        
+        st.write("### Rate Your Experience")
+        c3, c4 = st.columns(2)
+        star_opts = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐", 4: "⭐⭐⭐⭐", 5: "⭐⭐⭐⭐⭐"}
+        
+        with c3:
+            st.write(f"**{t['taste']}**")
+            taste = st.radio("T", [1,2,3,4,5], format_func=lambda x: star_opts[x], horizontal=True, label_visibility="collapsed")
+        with c4:
+            st.write(f"**{t['hygiene']}**")
+            hygiene = st.radio("H", [1,2,3,4,5], format_func=lambda x: star_opts[x], horizontal=True, label_visibility="collapsed")
+        
         comment = st.text_area(t['placeholder'])
         
         if st.form_submit_button(t['submit']):
-            if comment.strip():
+            if comment.strip() and s_name and s_roll:
                 with st.spinner("AI Analysis..."):
-                    cat = categorize_feedback(comment)
-                    sent = analyze_sentiment(comment)
-                    macs = get_macros(temp_item, grams)
-                    waste = estimate_waste(taste, grams)
-                    sugg = get_ai_suggestion(cat, sent, temp_item)
-                    
-                    ticket_id = len(st.session_state.feedback_db) + 1
-                    new_entry = {
-                        "ID": ticket_id, "Date": datetime.date.today(), "Category": cat, 
-                        "Item": temp_item, "Quantity": grams, "Protein": macs['p'], 
-                        "Fats": macs['f'], "Carbs": macs['c'], "Calories": macs['cal'], 
-                        "Waste_Est": waste, "Taste_Rating": taste, "Hygiene_Rating": hygiene, 
-                        "Comment": comment, "Sentiment": sent, "Status": "Pending", "AI_Suggestion": sugg
-                    }
-                    
-                    # Update local state AND save to file
-                    st.session_state.feedback_db = pd.concat([st.session_state.feedback_db, pd.DataFrame([new_entry])], ignore_index=True)
-                    save_data(st.session_state.feedback_db)
-                
-                st.balloons()
-                st.success("🌟 **Thanks for your feedback! We will resolve it soon.**")
-                st.info(f"Ticket ID: **#{ticket_id}** | Protein: **{macs['p']}g** | Calories: **{macs['cal']}**")
-            else:
-                st.warning("Please enter feedback.")
+                    cat, sent = categorize_feedback(comment), analyze_sentiment(comment)
+                    macs, waste = get_macros(m_type, food_item, grams), estimate_waste(taste, grams)
+                    sugg = get_ai_suggestion(cat, sent, food_item)
+                    entry = {"ID": len(st.session_state.db)+1, "Date": datetime.date.today(), "Name": s_name, "Roll_No": s_roll, "Course": s_course, "Meal_Type": m_type, "Item": food_item, "Quantity": grams, "Protein": macs['p'], "Calories": macs['cal'], "Waste_Est": waste, "Taste_Rating": taste, "Hygiene_Rating": hygiene, "Comment": comment, "Sentiment": sent, "AI_Suggestion": sugg}
+                    st.session_state.db = pd.concat([st.session_state.db, pd.DataFrame([entry])], ignore_index=True)
+                    st.session_state.db.to_csv(DB, index=False)
+                st.balloons(); st.success(f"Done! {macs['p']}g Protein | {macs['cal']} kcal")
+            else: st.warning("Please fill Name, Roll No, and Comment.")
 
-# --- 5. MANAGEMENT ANALYTICS ---
+# --- MANAGEMENT ANALYTICS ---
 elif page == "Management Analytics":
-    st.markdown("<h1>📊 Management Dashboard</h1>", unsafe_allow_html=True)
-    df = st.session_state.feedback_db
-
-    if df.empty:
-        st.info("Waiting for student feedback logs...")
-    else:
+    st.title("📊 Management & AI Insights")
+    df = st.session_state.db
+    if not df.empty:
+        # 1. Metrics
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Reviews", len(df))
-        m2.metric("Total Waste", f"{df['Waste_Est'].sum()/1000:.2f} kg")
-        m3.metric("Avg Taste", f"{df['Taste_Rating'].mean():.1f}/5")
+        m1.metric("Total Logs", len(df))
+        m2.metric("Est. Waste (kg)", f"{df['Waste_Est'].sum()/1000:.2f}")
+        m3.metric("Avg Hygiene", f"{df['Hygiene_Rating'].mean():.1f}/5")
+        
+        # 2. Procurement
+        waste_pct = (df['Waste_Est'].sum() / df['Quantity'].sum()) * 100
+        advice, _ = get_procurement_advice(waste_pct)
+        st.info(f"**📉 AI Procurement Advice:** {advice}")
 
-        st.plotly_chart(px.bar(df, x='Item', y='Waste_Est', color='Sentiment', barmode='group', template="plotly_dark"), use_container_width=True)
-
-        st.subheader("🛠️ AI Action Plan")
+        # 3. Detailed Feed (The Fix)
+        st.subheader("📋 Student Feedback Feed")
         for idx, row in df[::-1].iterrows():
-            with st.expander(f"Case #{row['ID']} - {row['Item']} ({row['Category']})"):
-                st.write(f"**Feedback:** {row['Comment']}")
-                st.info(f"💡 **AI Suggestion:** {row['AI_Suggestion']}")
-                status = st.selectbox("Update Status", ["Pending", "Resolved"], key=f"s_{idx}", index=0 if row['Status']=="Pending" else 1)
-                if st.button("Update Case", key=f"b_{idx}"):
-                    st.session_state.feedback_db.at[idx, 'Status'] = status
-                    save_data(st.session_state.feedback_db) # Save status update to file
-                    st.rerun()
-
-# --- 6. SETTINGS ---
-else:
-    st.title("⚙️ System Settings")
-    st.table(pd.DataFrame(NUTRITION_DATA).T)
-    st.download_button("📥 Download Database (CSV)", data=st.session_state.feedback_db.to_csv(index=False).encode('utf-8'), file_name="mess_ai_full_report.csv", mime="text/csv")
+            with st.expander(f"Review #{row['ID']} - {row['Name']} ({row['Item']})"):
+                col_a, col_b = st.columns([1, 2])
+                with col_a:
+                    st.write(f"**Roll No:** {row['Roll_No']}")
+                    st.write(f"**Taste:** {'⭐' * int(row['Taste_Rating'])}")
+                    st.write(f"**Hygiene:** {'🧼' * int(row['Hygiene_Rating'])}")
+                with col_b:
+                    st.markdown(f"**Comment:** {row['Comment']}")
+                    st.success(f"**AI Action Plan:** {row['AI_Suggestion']}")
+        
+        # 4. Chart
+        st.plotly_chart(px.bar(df, x='Meal_Type', y='Waste_Est', color='Sentiment', barmode='group', template="plotly_dark"), use_container_width=True)
+    else: st.info("No data recorded yet.")
